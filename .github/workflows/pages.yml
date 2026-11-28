@@ -1,0 +1,50 @@
+# 뽀금 웹 빌드 → GitHub Pages (이 저장소엔 빌드 결과물만 있음. 원본 소스 없음)
+name: Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy2.outputs.page_url || steps.deploy3.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 빌드 확인
+        run: |
+          for f in index.html index.js index.wasm index.pck index.service.worker.js index.manifest.json steps_paste.js .nojekyll; do
+            test -f "$f" || { echo "없음: $f"; exit 1; }
+          done
+          grep -q 'GODOT_THREADS_ENABLED = false' index.html || { echo "스레드 빌드는 GitHub Pages 에서 안 돌아요 (COOP/COEP 헤더 불가)"; exit 1; }
+          if find . -path ./.git -prune -o \( -name '*.gd' -o -name '*.tscn' -o -name 'project.godot' \) -print | grep -q .; then
+            echo "소스 파일이 섞여 있어요"; exit 1
+          fi
+          ls -la
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v5  # 2026-11-24: v3 업로드를 배포 단계가 못 찾는 일이 있어 최신으로
+        with:
+          path: .
+      # 2026-11-24: 배포 단계가 가끔 방금 올린 묶음을 못 찾음 ("No artifacts named github-pages") → 잠깐 쉬고 두 번 더 시도
+      - id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - if: steps.deploy.outcome == 'failure'
+        run: sleep 30
+      - id: deploy2
+        if: steps.deploy.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - if: steps.deploy.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        run: sleep 60
+      - id: deploy3
+        if: steps.deploy.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        uses: actions/deploy-pages@v4
